@@ -147,6 +147,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	dynamicMux.HandleFunc("GET /api/account/orders", apiHandler.AccountOrders)
 	dynamicMux.HandleFunc("GET /api/orders/{id}", apiHandler.Order)
 	dynamicMux.HandleFunc("GET /api/products", apiHandler.Products)
+	dynamicMux.HandleFunc("OPTIONS /api/products", apiHandler.ProductPreflight)
 	dynamicMux.HandleFunc("GET /api/integrations/warehouse/orders", apiHandler.WarehouseOrders)
 	dynamicMux.Handle("POST /products/{id}/reviews", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(reviewHandler.Create)))
 	dynamicMux.HandleFunc("GET /login", authenticationHandler.LoginPage)
@@ -215,7 +216,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 		}
 	})
 
-	dynamicHandler := validateRequestOrigin(options.AppOrigin, renderer)(permissiveCORS(dynamicMux))
+	dynamicHandler := validateRequestOrigin(options.AppOrigin, renderer)(dynamicMux)
 
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("GET /health", func(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -236,8 +237,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	handler := applyMiddleware(
 		mainMux,
 		cspNonce,
-		contentSecurityPolicy,
-		contentTypeOptions,
+		securityHeaders,
 		recoverPanics(logger, renderer),
 	)
 	return &Application{Handler: handler, publicRoot: publicRoot}, nil
@@ -255,6 +255,9 @@ func newStaticHandler(publicRoot *os.Root) http.Handler {
 		if err != nil || fileInfo.IsDir() {
 			http.NotFound(responseWriter, request)
 			return
+		}
+		if filepath.Base(relativePath) == "shipping-widget.css" || filepath.Base(relativePath) == "shipping-widget.js" {
+			responseWriter.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 		}
 		fileServer.ServeHTTP(responseWriter, request)
 	})
