@@ -14,11 +14,11 @@ const (
 	MaxLength = 128
 
 	currentArgon2Version = argon2.Version
-	argon2Memory         = 19 * 1024
+	memoryKiB            = 19 * 1024
 	iterations           = 2
 	threads              = 1
 	saltLength           = 16
-	argon2KeyLength      = 32
+	keyLength            = 32
 )
 
 func Hash(password string) (string, error) {
@@ -33,14 +33,14 @@ func Hash(password string) (string, error) {
 		[]byte(password),
 		salt,
 		iterations,
-		argon2Memory,
+		memoryKiB,
 		threads,
-		argon2KeyLength,
+		keyLength,
 	)
 
 	return encodeArgon2idHash(argon2idHash{
 		version:     currentArgon2Version,
-		memoryKiB:   argon2Memory,
+		memoryKiB:   memoryKiB,
 		iterations:  iterations,
 		parallelism: threads,
 		salt:        salt,
@@ -75,6 +75,17 @@ func Verify(password, encodedHash string) bool {
 	return subtle.ConstantTimeCompare(candidateHash, storedHash.derivedKey) == 1
 }
 
-func NeedsRehash(string) bool {
-	return false
+func NeedsRehash(encodedHash string) bool {
+	if _, ok := decodeLegacyHash(encodedHash); ok {
+		return true
+	}
+	storedHash, ok := parseArgon2idHash(encodedHash)
+	if !ok {
+		return false
+	}
+	return storedHash.version != currentArgon2Version ||
+		storedHash.memoryKiB != memoryKiB ||
+		storedHash.iterations != iterations ||
+		storedHash.parallelism != threads ||
+		len(storedHash.derivedKey) != keyLength
 }
