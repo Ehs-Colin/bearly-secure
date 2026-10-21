@@ -16,6 +16,7 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/database"
 	"github.com/bootdotdev/learn-web-security/internal/httpserver"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
+	"github.com/bootdotdev/learn-web-security/internal/storage"
 )
 
 func main() {
@@ -44,6 +45,10 @@ func run(ctx context.Context) error {
 	if err := database.Migrate(ctx, databaseConnection); err != nil {
 		return err
 	}
+	keyring, err := storage.NewKeyring(appConfig.ActiveEncryptionKeyVersion, appConfig.EncryptionKeys)
+	if err != nil {
+		return fmt.Errorf("create encryption keyring: %w", err)
+	}
 
 	appLogger, err := logging.Open(filepath.Join(workingDirectory, "data", "bearly-secure.log"))
 	if err != nil {
@@ -58,6 +63,7 @@ func run(ctx context.Context) error {
 		PawPalAPIKey:            appConfig.PawPalAPIKey,
 		AcornFulfillmentDelay:   appConfig.AcornFulfillmentDelay,
 		DownloadSigningKey:      appConfig.DownloadSigningKey,
+		EncryptionKeyring:       keyring,
 		TrustedProxyHops:        appConfig.TrustedProxyHops,
 		DataDirectory:           filepath.Join(workingDirectory, "data"),
 		FixtureDirectory:        filepath.Join(workingDirectory, "data", "fixtures"),
