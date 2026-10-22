@@ -213,7 +213,16 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 		}
 	})
 
-	dynamicHandler := validateRequestOrigin(options.AppOrigin, renderer)(dynamicMux)
+	rateLimitSettings := rateLimitOptions{
+		window:  time.Minute,
+		maximum: 100,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+	}
+	dynamicHandler := applyMiddleware(
+		dynamicMux,
+		fixedWindowRateLimiter(rateLimitSettings),
+		validateRequestOrigin(options.AppOrigin, renderer),
+	)
 
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("GET /health", func(responseWriter http.ResponseWriter, _ *http.Request) {
