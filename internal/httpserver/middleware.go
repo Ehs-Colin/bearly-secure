@@ -115,10 +115,19 @@ func LoadShedder(_ int, _ int) func(http.Handler) http.Handler {
 	}
 }
 
-func SearchThrottle(_ *templates.Renderer) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return next
-	}
+func SearchThrottle(renderer *templates.Renderer) func(http.Handler) http.Handler {
+	return fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Second,
+		maximum: 5,
+		key: func(r *http.Request) string {
+			return "search"
+		},
+		onLimit: func(w http.ResponseWriter, r *http.Request, state rateLimitState) {
+			if err := httpx.RespondWithErrorPage(w, renderer, http.StatusTooManyRequests, "Search Is Busy", "Try again shortly."); err != nil {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+		},
+	})
 }
 
 type rateLimitCounter struct {
