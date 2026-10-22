@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bootdotdev/learn-web-security/internal/account"
@@ -137,27 +138,89 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	if err != nil {
 		return nil, err
 	}
+	productRestricted := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Minute,
+		maximum: 30,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+		onLimit: func(responseWriter http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+			httpx.RespondWithJSON(responseWriter, http.StatusTooManyRequests, map[string]string{"error": "Too many requests"})
+		},
+	})
+	loginSourceRestricted := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Minute * 15,
+		maximum: 20,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+		onLimit: func(responseWriter http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+			httpx.RespondWithJSON(responseWriter, http.StatusTooManyRequests, map[string]string{"error": "Too many requests"})
+		},
+	})
+	loginAccountRestricted := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Minute * 15,
+		maximum: 5,
+		key: func(request *http.Request) string {
+			return strings.ToLower(strings.TrimSpace(request.FormValue("email")))
+		},
+		onLimit: func(responseWriter http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+			httpx.RespondWithJSON(responseWriter, http.StatusTooManyRequests, map[string]string{"error": "Too many requests"})
+		},
+	})
+	passwordResetSourceRestricted := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Hour,
+		maximum: 10,
+		key:     clientIPKeyWithTrustedProxies(options.TrustedProxyHops),
+		onLimit: func(responseWriter http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+			httpx.RespondWithJSON(responseWriter, http.StatusTooManyRequests, map[string]string{"error": "Too many requests"})
+		},
+	})
+	passwordResetAccountRestricted := fixedWindowRateLimiter(rateLimitOptions{
+		window:  time.Hour,
+		maximum: 3,
+		key: func(request *http.Request) string {
+			return strings.ToLower(strings.TrimSpace(request.FormValue("email")))
+		},
+		onLimit: func(responseWriter http.ResponseWriter, _ *http.Request, _ rateLimitState) {
+			responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+			httpx.RespondWithJSON(responseWriter, http.StatusTooManyRequests, map[string]string{"error": "Too many requests"})
+		},
+	})
 	dynamicMux := http.NewServeMux()
 	dynamicMux.HandleFunc("GET /{$}", storefrontHandler.Storefront)
 	dynamicMux.HandleFunc("GET /search", storefrontHandler.Search)
 	dynamicMux.HandleFunc("GET /products/{id}", storefrontHandler.Product)
 	dynamicMux.HandleFunc("GET /api/account/orders", apiHandler.AccountOrders)
 	dynamicMux.HandleFunc("GET /api/orders/{id}", apiHandler.Order)
-	dynamicMux.HandleFunc("GET /api/products", apiHandler.Products)
+	dynamicMux.Handle("GET /api/products", productRestricted(http.HandlerFunc(apiHandler.Products)))
 	dynamicMux.HandleFunc("OPTIONS /api/products", apiHandler.ProductPreflight)
 	dynamicMux.HandleFunc("GET /api/integrations/warehouse/orders", apiHandler.WarehouseOrders)
 	dynamicMux.Handle("POST /products/{id}/reviews", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(reviewHandler.Create)))
 	dynamicMux.HandleFunc("GET /login", authenticationHandler.LoginPage)
-	dynamicMux.Handle("POST /login", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.Login)))
+	dynamicMux.Handle("POST /login", parseForm(options.MaxRequestBodyBytes, renderer)(loginSourceRestricted(
+		loginAccountRestricted(
+			http.HandlerFunc(authenticationHandler.Login),
+		),
+	)))
 	dynamicMux.HandleFunc("GET /login/totp", authenticationHandler.TOTPLoginPage)
-	dynamicMux.Handle("POST /login/totp", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.TOTPLogin)))
+	dynamicMux.Handle("POST /login/totp", loginSourceRestricted(
+		parseForm(
+			options.MaxRequestBodyBytes,
+			renderer,
+		)(http.HandlerFunc(authenticationHandler.TOTPLogin))))
 	dynamicMux.HandleFunc("POST /login/totp/cancel", authenticationHandler.CancelTOTPLogin)
 	dynamicMux.HandleFunc("GET /signup", authenticationHandler.SignupPage)
 	dynamicMux.Handle("POST /signup", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.Signup)))
 	dynamicMux.HandleFunc("GET /recover-mfa", authenticationHandler.MFARecoveryPage)
 	dynamicMux.Handle("POST /recover-mfa", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.RecoverMFA)))
 	dynamicMux.HandleFunc("GET /password-reset", authenticationHandler.PasswordResetRequestPage)
-	dynamicMux.Handle("POST /password-reset", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.RequestPasswordReset)))
+	dynamicMux.Handle("POST /password-reset", passwordResetSourceRestricted(
+		passwordResetAccountRestricted(
+			parseForm(
+				options.MaxRequestBodyBytes,
+				renderer,
+			)(http.HandlerFunc(authenticationHandler.RequestPasswordReset)))))
 	dynamicMux.HandleFunc("GET /password-reset/{token}", authenticationHandler.PasswordResetPage)
 	dynamicMux.Handle("POST /password-reset/{token}", parseForm(options.MaxRequestBodyBytes, renderer)(http.HandlerFunc(authenticationHandler.ResetPassword)))
 	dynamicMux.HandleFunc("POST /logout", authenticationHandler.Logout)
