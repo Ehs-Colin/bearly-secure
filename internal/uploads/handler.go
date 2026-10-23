@@ -37,8 +37,15 @@ type Handler struct {
 
 func NewHandler(accountStore *accounts.Store, store *Store, renderer *templates.Renderer, logger *logging.Logger, encryptionKeyring Keyring, uploadDirectory string, maxUploadBytes int64, downloadSigningKey [32]byte) *Handler {
 	return &Handler{
-		accountStore: accountStore, store: store, renderer: renderer, logger: logger, encryptionKeyring: encryptionKeyring,
-		uploadDirectory: uploadDirectory, maxUploadBytes: maxUploadBytes, downloadSigningKey: downloadSigningKey, now: time.Now,
+		accountStore:       accountStore,
+		store:              store,
+		renderer:           renderer,
+		logger:             logger,
+		encryptionKeyring:  encryptionKeyring,
+		uploadDirectory:    uploadDirectory,
+		maxUploadBytes:     maxUploadBytes,
+		downloadSigningKey: downloadSigningKey,
+		now:                time.Now,
 	}
 }
 
@@ -167,7 +174,7 @@ func (handler *Handler) readUpload(responseWriter http.ResponseWriter, request *
 		return nil, "", err
 	}
 	files := request.MultipartForm.File["document"]
-	if len(files) == 0 {
+	if len(files) != 1 {
 		return nil, "", errors.New("missing document upload")
 	}
 	file, err := files[0].Open()
