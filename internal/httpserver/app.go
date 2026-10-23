@@ -33,6 +33,11 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/uploads"
 )
 
+const (
+	MaxInFlight       = 50
+	RetryAfterSeconds = 1
+)
+
 type Options struct {
 	AppOrigin               string
 	MaxPublicProductResults int
@@ -278,6 +283,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	}
 	dynamicHandler := applyMiddleware(
 		dynamicMux,
+		LoadShedder(MaxInFlight, RetryAfterSeconds),
 		fixedWindowRateLimiter(rateLimitSettings),
 		validateRequestOrigin(options.AppOrigin, renderer),
 	)
