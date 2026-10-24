@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bootdotdev/learn-web-security/internal/accounts"
@@ -15,6 +16,7 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/botdetection"
 	"github.com/bootdotdev/learn-web-security/internal/httpx"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
+	"github.com/bootdotdev/learn-web-security/internal/observability"
 	"github.com/bootdotdev/learn-web-security/internal/templates"
 )
 
@@ -29,13 +31,15 @@ type authPage struct {
 }
 
 type authHandler struct {
-	accounts         *accounts.Store
-	renderer         *templates.Renderer
-	logger           *logging.Logger
-	mfa              *mfa.Store
-	passwordResets   *passwordreset.Store
-	appOrigin        string
-	trustedProxyHops int
+	accounts           *accounts.Store
+	renderer           *templates.Renderer
+	logger             *logging.Logger
+	mfa                *mfa.Store
+	passwordResets     *passwordreset.Store
+	appOrigin          string
+	trustedProxyHops   int
+	failedLoginsAlert  *observability.AuthAlertThreshold
+	resetRequestsAlert *observability.AuthAlertThreshold
 }
 
 func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordResetStore *passwordreset.Store, renderer *templates.Renderer, logger *logging.Logger, appOrigin string, trustedProxyHops int) *authHandler {
@@ -47,6 +51,18 @@ func newAuthHandler(accountStore *accounts.Store, mfaStore *mfa.Store, passwordR
 		passwordResets:   passwordResetStore,
 		appOrigin:        appOrigin,
 		trustedProxyHops: trustedProxyHops,
+		failedLoginsAlert: observability.NewAuthAlertThreshold(
+			"failed_logins",
+			3,
+			5*time.Minute,
+			logger,
+		),
+		resetRequestsAlert: observability.NewAuthAlertThreshold(
+			"password_reset_requests",
+			3,
+			10*time.Minute,
+			logger,
+		),
 	}
 }
 
@@ -92,6 +108,11 @@ func (handler *authHandler) Login(responseWriter http.ResponseWriter, request *h
 			"failureReason": loginFailureReason(found),
 			"returnTo":      returnTo,
 		})
+		handler.failedLoginsAlert.Record(
+			getRequestId(request.Context()),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			nullableUserID(user, found),
+		)
 		if err := handler.renderLogin(responseWriter, http.StatusUnauthorized, "Invalid email or password", returnTo); err != nil {
 			handler.internalError(responseWriter, request, err)
 		}

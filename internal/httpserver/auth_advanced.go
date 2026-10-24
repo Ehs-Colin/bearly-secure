@@ -132,6 +132,11 @@ func (handler *authHandler) TOTPLogin(responseWriter http.ResponseWriter, reques
 			handler.internalError(responseWriter, request, err)
 			return
 		}
+		handler.failedLoginsAlert.Record(
+			getRequestId(request.Context()),
+			clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+			user.ID,
+		)
 		handler.logAuthenticationEvent(request, "login_attempt", map[string]any{
 			"email":         user.Email,
 			"userId":        user.ID,
@@ -296,6 +301,11 @@ func (handler *authHandler) RequestPasswordReset(responseWriter http.ResponseWri
 		handler.internalError(responseWriter, request, err)
 		return
 	}
+	handler.resetRequestsAlert.Record(
+		getRequestId(request.Context()),
+		clientIPKeyWithTrustedProxies(handler.trustedProxyHops)(request),
+		nullableUserID(user, found),
+	)
 	if !found {
 		handler.logAuthenticationEvent(request, "password_reset_request", map[string]any{
 			"email":         email,

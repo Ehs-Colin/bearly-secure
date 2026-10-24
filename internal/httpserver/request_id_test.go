@@ -10,8 +10,8 @@ import (
 func TestAssignRequestIDReplacesClientIDAndKeepsUUIDInContext(t *testing.T) {
 	clientID := uuid.MustParse("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 	var seenID uuid.UUID
-	handler := assignRequestID(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		seenID = requestID(request.Context())
+	handler := assignRequestId(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		seenID = getRequestId(request.Context())
 		if seenID == uuid.Nil() || seenID == clientID {
 			t.Fatalf("expected server-generated request ID, got %v", seenID)
 		}
