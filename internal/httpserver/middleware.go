@@ -3,6 +3,7 @@
 package httpserver
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
 	"github.com/bootdotdev/learn-web-security/internal/httpx"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
@@ -23,11 +25,35 @@ import (
 
 type middleware func(http.Handler) http.Handler
 
+type contextKey string
+
+const (
+	requestIDContextKey contextKey = "request-id"
+)
+
 func applyMiddleware(handler http.Handler, middlewareChain ...middleware) http.Handler {
 	for _, currentMiddleware := range slices.Backward(middlewareChain) {
 		handler = currentMiddleware(handler)
 	}
 	return handler
+}
+
+func assignRequestId(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		requestId := uuid.NewV4()
+		responseWriter.Header().Set("X-Request-Id", requestId.String())
+
+		ctx := context.WithValue(request.Context(), requestIDContextKey, requestId)
+		next.ServeHTTP(responseWriter, request.WithContext(ctx))
+	})
+}
+
+func getRequestId(ctx context.Context) uuid.UUID {
+	requestId, ok := ctx.Value(requestIDContextKey).(uuid.UUID)
+	if !ok {
+		requestId = uuid.NewV4()
+	}
+	return requestId
 }
 
 func validateRequestOrigin(appOrigin string, renderer *templates.Renderer) middleware {
